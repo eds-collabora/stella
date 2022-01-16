@@ -155,11 +155,49 @@ void Paddles::swapEvents(Event::Type& event1, Event::Type& event2)
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void Paddles::update()
 {
-  setPin(DigitalPin::Three, true);
+  updateA();
+  updateB();
+}
+
+void Paddles::updateA()
+{
   setPin(DigitalPin::Four, true);
 
   // Digital events (from keyboard or joystick hats & buttons)
   bool firePressedA = myEvent.get(myLeftAFireEvent) != 0;
+
+  // Paddle movement is a very difficult thing to accurately emulate,
+  // since it originally came from an analog device that had very
+  // peculiar behaviour
+  // Compounding the problem is the fact that we'd like to emulate
+  // movement with 'digital' data (like from a keyboard or a digital
+  // joystick axis), but also from a mouse (relative values)
+  // and Stelladaptor-like devices (absolute analog values clamped to
+  // a certain range)
+  // And to top it all off, we don't want one devices input to conflict
+  // with the others ...
+
+  if(!updateAnalogAxesA())
+  {
+    updateMouseA(firePressedA);
+    updateDigitalAxesA();
+
+    // Only change state if the charge has actually changed
+    if(myCharge[0] != myLastCharge[0])
+    {
+      setPin(AnalogPin::Nine, AnalogReadout::connectToVcc(MAX_RESISTANCE * (myCharge[0] / double(TRIGMAX))));
+      myLastCharge[0] = myCharge[0];
+    }
+  }
+
+  setPin(DigitalPin::Four, !getAutoFireState(firePressedA));
+}
+
+void Paddles::updateB()
+{
+  setPin(DigitalPin::Three, true);
+
+  // Digital events (from keyboard or joystick hats & buttons)
   bool firePressedB = myEvent.get(myLeftBFireEvent) != 0;
 
   // Paddle movement is a very difficult thing to accurately emulate,
@@ -173,10 +211,10 @@ void Paddles::update()
   // And to top it all off, we don't want one devices input to conflict
   // with the others ...
 
-  if(!updateAnalogAxes())
+  if(!updateAnalogAxesB())
   {
-    updateMouse(firePressedA, firePressedB);
-    updateDigitalAxes();
+    updateMouseB(firePressedB);
+    updateDigitalAxesB();
 
     // Only change state if the charge has actually changed
     if(myCharge[1] != myLastCharge[1])
@@ -184,30 +222,24 @@ void Paddles::update()
       setPin(AnalogPin::Five, AnalogReadout::connectToVcc(MAX_RESISTANCE * (myCharge[1] / double(TRIGMAX))));
       myLastCharge[1] = myCharge[1];
     }
-    if(myCharge[0] != myLastCharge[0])
-    {
-      setPin(AnalogPin::Nine, AnalogReadout::connectToVcc(MAX_RESISTANCE * (myCharge[0] / double(TRIGMAX))));
-      myLastCharge[0] = myCharge[0];
-    }
   }
 
-  setPin(DigitalPin::Four, !getAutoFireState(firePressedA));
   setPin(DigitalPin::Three, !getAutoFireStateP1(firePressedB));
 }
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-AnalogReadout::Connection Paddles::getReadOut(int lastAxis, int& newAxis, int center)
-{
-  const float range = ANALOG_RANGE - analogDeadZone() * 2;
-
+static void applyDeadZone(int& newAxis) {
   // dead zone, ignore changes inside the dead zone
-  if(newAxis > analogDeadZone())
-    newAxis -= analogDeadZone();
-  else if(newAxis < -analogDeadZone())
-    newAxis += analogDeadZone();
+  if(newAxis > Paddles::analogDeadZone())
+    newAxis -= Paddles::analogDeadZone();
+  else if(newAxis < -Paddles::analogDeadZone())
+    newAxis += Paddles::analogDeadZone();
   else
     newAxis = 0; // treat any dead zone value as zero
+}
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+AnalogReadout::Connection Paddles::getReadOut(int lastAxis, int& newAxis, int center, int range)
+{
   static constexpr std::array<float, MAX_DEJITTER - MIN_DEJITTER + 1> bFac = {
     // higher values mean more dejitter strength
     0.f, // off
@@ -232,7 +264,7 @@ AnalogReadout::Connection Paddles::getReadOut(int lastAxis, int& newAxis, int ce
     newAxis = newVal;
 
   // apply linearity
-  float linearVal = newAxis / (range / 2); // scale to -1.0..+1.0
+  float linearVal = newAxis / (range / 2.0f); // scale to -1.0..+1.0
 
   if(newAxis >= 0)
     linearVal = powf(std::abs(linearVal), LINEARITY);
@@ -251,93 +283,123 @@ AnalogReadout::Connection Paddles::getReadOut(int lastAxis, int& newAxis, int ce
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-bool Paddles::updateAnalogAxes()
+bool Paddles::updateAnalogAxesA()
 {
-  // Analog axis events from Stelladaptor-like devices,
-  // (which includes analog USB controllers)
-  // These devices generate data in the range -32768 to 32767,
-  // so we have to scale appropriately
-  // Since these events are generated and stored indefinitely,
-  // we only process the first one we see (when it differs from
-  // previous values by a pre-defined amount)
-  // Otherwise, it would always override input from digital and mouse
-
-
   int sa_xaxis = myEvent.get(myAAxisValue);
-  int sa_yaxis = myEvent.get(myBAxisValue);
   bool sa_changed = false;
 
+  const float range = ANALOG_RANGE - analogDeadZone() * 2;
+
   if(abs(myLastAxisX - sa_xaxis) > 10)
-  {
-    setPin(AnalogPin::Nine, getReadOut(myLastAxisX, sa_xaxis, XCENTER));
-    sa_changed = true;
-  }
+    {
+      applyDeadZone(sa_xaxis);
+      setPin(AnalogPin::Nine, getReadOut(myLastAxisX, sa_xaxis, XCENTER, range));
+      sa_changed = true;
+    }
 
-  if(abs(myLastAxisY - sa_yaxis) > 10)
-  {
-    setPin(AnalogPin::Five, getReadOut(myLastAxisY, sa_yaxis, YCENTER));
-    sa_changed = true;
-  }
   myLastAxisX = sa_xaxis;
-  myLastAxisY = sa_yaxis;
-
   return sa_changed;
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Paddles::updateMouse(bool& firePressedA, bool& firePressedB)
+bool Paddles::updateAnalogAxesB()
+{
+  int sa_yaxis = myEvent.get(myBAxisValue);
+  bool sa_changed = false;
+
+  const float range = ANALOG_RANGE - analogDeadZone() * 2;
+
+  if(abs(myLastAxisY - sa_yaxis) > 10)
+  {
+    applyDeadZone(sa_yaxis);
+    setPin(AnalogPin::Five, getReadOut(myLastAxisY, sa_yaxis, YCENTER, range));
+    sa_changed = true;
+  }
+
+  myLastAxisY = sa_yaxis;
+  return sa_changed;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void Paddles::updateMouseA(bool& firePressedA)
 {
   // Mouse motion events give relative movement
   // That is, they're only relevant if they're non-zero
-  if(myMPaddleID > -1)
+  if(myMPaddleID == 0)
   {
     // We're in auto mode, where a single axis is used for one paddle only
-    myCharge[myMPaddleID] = BSPF::clamp(myCharge[myMPaddleID] -
-                                        (myEvent.get(myAxisMouseMotion) * MOUSE_SENSITIVITY),
-                                        TRIGMIN, TRIGRANGE);
+    myCharge[0] = BSPF::clamp(myCharge[0] -
+                              (myEvent.get(myAxisMouseMotion) * MOUSE_SENSITIVITY),
+                              TRIGMIN, TRIGRANGE);
 
-    if(myMPaddleID == 0)
-      firePressedA = firePressedA
-        || myEvent.get(Event::MouseButtonLeftValue)
-        || myEvent.get(Event::MouseButtonRightValue);
-    else
-      firePressedB = firePressedB
-        || myEvent.get(Event::MouseButtonLeftValue)
-        || myEvent.get(Event::MouseButtonRightValue);
+    firePressedA = firePressedA
+      || myEvent.get(Event::MouseButtonLeftValue)
+      || myEvent.get(Event::MouseButtonRightValue);
   }
   else
   {
     // Test for 'untied' mouse axis mode, where each axis is potentially
     // mapped to a separate paddle
-    if(myMPaddleIDX > -1)
+    if(myMPaddleIDX == 0)
     {
-      myCharge[myMPaddleIDX] = BSPF::clamp(myCharge[myMPaddleIDX] -
-                                           (myEvent.get(Event::MouseAxisXMove) * MOUSE_SENSITIVITY),
-                                           TRIGMIN, TRIGRANGE);
-      if(myMPaddleIDX == 0)
-        firePressedA = firePressedA
-          || myEvent.get(Event::MouseButtonLeftValue);
-      else
-        firePressedB = firePressedB
-          || myEvent.get(Event::MouseButtonLeftValue);
+      myCharge[0] = BSPF::clamp(myCharge[0] -
+                                (myEvent.get(Event::MouseAxisXMove) * MOUSE_SENSITIVITY),
+                                TRIGMIN, TRIGRANGE);
+      firePressedA = firePressedA
+        || myEvent.get(Event::MouseButtonLeftValue);
     }
-    if(myMPaddleIDY > -1)
+    if(myMPaddleIDY == 0)
     {
-      myCharge[myMPaddleIDY] = BSPF::clamp(myCharge[myMPaddleIDY] -
-                                           (myEvent.get(Event::MouseAxisYMove) * MOUSE_SENSITIVITY),
-                                           TRIGMIN, TRIGRANGE);
-      if(myMPaddleIDY == 0)
-        firePressedA = firePressedA
-          || myEvent.get(Event::MouseButtonRightValue);
-      else
-        firePressedB = firePressedB
-          || myEvent.get(Event::MouseButtonRightValue);
+      myCharge[0] = BSPF::clamp(myCharge[0] -
+                                (myEvent.get(Event::MouseAxisYMove) * MOUSE_SENSITIVITY),
+                                TRIGMIN, TRIGRANGE);
+      firePressedA = firePressedA
+        || myEvent.get(Event::MouseButtonRightValue);
     }
   }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void Paddles::updateDigitalAxes()
+void Paddles::updateMouseB(bool& firePressedB)
+{
+  // Mouse motion events give relative movement
+  // That is, they're only relevant if they're non-zero
+  if(myMPaddleID == 1)
+  {
+    // We're in auto mode, where a single axis is used for one paddle only
+    myCharge[1] = BSPF::clamp(myCharge[1] -
+                              (myEvent.get(myAxisMouseMotion) * MOUSE_SENSITIVITY),
+                              TRIGMIN, TRIGRANGE);
+
+    firePressedB = firePressedB
+      || myEvent.get(Event::MouseButtonLeftValue)
+      || myEvent.get(Event::MouseButtonRightValue);
+  }
+  else
+  {
+    // Test for 'untied' mouse axis mode, where each axis is potentially
+    // mapped to a separate paddle
+    if(myMPaddleIDX == 1)
+    {
+      myCharge[1] = BSPF::clamp(myCharge[1] -
+                                (myEvent.get(Event::MouseAxisXMove) * MOUSE_SENSITIVITY),
+                                TRIGMIN, TRIGRANGE);
+      firePressedB = firePressedB
+        || myEvent.get(Event::MouseButtonLeftValue);
+    }
+    if(myMPaddleIDY == 1)
+    {
+      myCharge[1] = BSPF::clamp(myCharge[1] -
+                                (myEvent.get(Event::MouseAxisYMove) * MOUSE_SENSITIVITY),
+                                TRIGMIN, TRIGRANGE);
+      firePressedB = firePressedB
+        || myEvent.get(Event::MouseButtonRightValue);
+    }
+  }
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void Paddles::updateDigitalAxesA()
 {
   // Finally, consider digital input, where movement happens
   // until a digital event is released
@@ -347,15 +409,8 @@ void Paddles::updateDigitalAxes()
     if(myPaddleRepeatA > DIGITAL_SENSITIVITY)
       myPaddleRepeatA = DIGITAL_DISTANCE;
   }
-  if(myKeyRepeatB)
-  {
-    myPaddleRepeatB++;
-    if(myPaddleRepeatB > DIGITAL_SENSITIVITY)
-      myPaddleRepeatB = DIGITAL_DISTANCE;
-  }
 
   myKeyRepeatA = false;
-  myKeyRepeatB = false;
 
   if(myEvent.get(myLeftADecEvent))
   {
@@ -369,6 +424,22 @@ void Paddles::updateDigitalAxes()
     if((myCharge[myAxisDigitalZero] + myPaddleRepeatA) < TRIGRANGE)
       myCharge[myAxisDigitalZero] += myPaddleRepeatA;
   }
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void Paddles::updateDigitalAxesB()
+{
+  // Finally, consider digital input, where movement happens
+  // until a digital event is released
+  if(myKeyRepeatB)
+  {
+    myPaddleRepeatB++;
+    if(myPaddleRepeatB > DIGITAL_SENSITIVITY)
+      myPaddleRepeatB = DIGITAL_DISTANCE;
+  }
+
+  myKeyRepeatB = false;
+
   if(myEvent.get(myLeftBDecEvent))
   {
     myKeyRepeatB = true;

@@ -380,8 +380,6 @@ void PhysicalJoystickHandler::setStickDefaultMapping(int stick, Event::Type even
           // put all controller events into their own mode's mappings
           for (const auto& item : DefaultLeftJoystickMapping)
             setDefaultAction(stick, item, event, EventMode::kJoystickMode, updateDefaults);
-          for (const auto& item : DefaultLeftPaddlesMapping)
-            setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
           for (const auto& item : DefaultLeftKeyboardMapping)
             setDefaultAction(stick, item, event, EventMode::kKeyboardMode, updateDefaults);
           for (const auto& item : DefaultLeftDrivingMapping)
@@ -392,13 +390,78 @@ void PhysicalJoystickHandler::setStickDefaultMapping(int stick, Event::Type even
           // put all controller events into their own mode's mappings
           for (const auto& item : DefaultRightJoystickMapping)
             setDefaultAction(stick, item, event, EventMode::kJoystickMode, updateDefaults);
-          for (const auto& item : DefaultRightPaddlesMapping)
-            setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
           for (const auto& item : DefaultRightKeyboardMapping)
             setDefaultAction(stick, item, event, EventMode::kKeyboardMode, updateDefaults);
           for (const auto& item : DefaultRightDrivingMapping)
             setDefaultAction(stick, item, event, EventMode::kDrivingMode, updateDefaults);
         }
+#if defined(RETRON77)
+        const bool retron77 = true;
+#else
+        const bool retron77 = false;
+#endif
+
+        // Regular joysticks can only be used by one player at a time,
+        // so we need to separate the paddles onto different
+        // devices. The R77 controllers support two players each when
+        // used as paddles, so are different. Similarly, stelladaptors
+        // and 2600-daptors support two players natively.
+        const int paddlesPerJoystick = (j->type == PhysicalJoystick::Type::REGULAR && !retron77) ? 1 : 2;
+
+        if( paddlesPerJoystick == 2 )
+        {
+          if( useLeftMappings )
+          {
+            for (const auto& item : DefaultLeftPaddlesMapping)
+              setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+          }
+          else
+          {
+            for (const auto& item : DefaultRightPaddlesMapping)
+              setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+          }
+        }
+        else
+        {
+          // One paddle per joystick means we need different defaults,
+          // such that each player gets the same mapping.
+
+          // A regular joystick defaults to left A/B or right A/B
+          // based on the stick number reduced modulo 4 in paddle
+          // mode; this means stick 0 -> left A, stick 1 -> left B,
+          // stick 2 -> right A, stick 3 -> right B, which matches
+          // what you'd expect for most games.
+          const bool useLeftPaddleMappings = (stick % 4) < 2;
+          const bool usePaddleAMappings = (stick % 2) == 0;
+
+          if( useLeftPaddleMappings )
+          {
+            if( usePaddleAMappings )
+            {
+              for (const auto& item : DefaultLeftAPaddlesMapping)
+                setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+            }
+            else
+            {
+              for (const auto& item : DefaultLeftBPaddlesMapping)
+                setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+            }
+          }
+          else
+          {
+            if( usePaddleAMappings )
+            {
+              for (const auto& item : DefaultRightAPaddlesMapping)
+                setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+            }
+            else
+            {
+              for (const auto& item : DefaultRightBPaddlesMapping)
+                setDefaultAction(stick, item, event, EventMode::kPaddlesMode, updateDefaults);
+            }
+          }
+        }
+
         for(const auto& item : DefaultCommonMapping)
           setDefaultAction(stick, item, event, EventMode::kCommonMode, updateDefaults);
         // update running emulation mapping too
@@ -1231,6 +1294,40 @@ PhysicalJoystickHandler::EventMappingArray PhysicalJoystickHandler::DefaultRight
   //{Event::RightPaddleBDecrease,JOY_CTRL_NONE, JoyAxis::Y, JoyDir::POS},
   //{Event::RightPaddleBIncrease,JOY_CTRL_NONE, JoyAxis::Y, JoyDir::NEG},
   {Event::RightPaddleBFire,    1},
+};
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+PhysicalJoystickHandler::EventMappingArray PhysicalJoystickHandler::DefaultLeftAPaddlesMapping = {
+  {Event::LeftPaddleAAnalog, JOY_CTRL_NONE, JoyAxis::X, JoyDir::ANALOG},
+  // Current code does NOT allow digital and anlog events on the same axis at the same time
+  //{Event::LeftPaddleADecrease, JOY_CTRL_NONE, JoyAxis::X, JoyDir::POS},
+  //{Event::LeftPaddleAIncrease, JOY_CTRL_NONE, JoyAxis::X, JoyDir::NEG},
+  {Event::LeftPaddleAFire,   0},
+};
+
+PhysicalJoystickHandler::EventMappingArray PhysicalJoystickHandler::DefaultLeftBPaddlesMapping = {
+  {Event::LeftPaddleBAnalog, JOY_CTRL_NONE, JoyAxis::X, JoyDir::ANALOG},
+  // Current code does NOT allow digital and anlog events on the same axis at the same
+  //{Event::LeftPaddleBDecrease,  JOY_CTRL_NONE, JoyAxis::X, JoyDir::POS},
+  //{Event::LeftPaddleBIncrease,  JOY_CTRL_NONE, JoyAxis::X, JoyDir::NEG},
+  {Event::LeftPaddleBFire,   0},
+};
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+PhysicalJoystickHandler::EventMappingArray PhysicalJoystickHandler::DefaultRightAPaddlesMapping = {
+  {Event::RightPaddleAAnalog, JOY_CTRL_NONE, JoyAxis::X, JoyDir::ANALOG},
+  // Current code does NOT allow digital and anlog events on the same axis at the same
+  //{Event::RightPaddleADecrease,  JOY_CTRL_NONE, JoyAxis::X, JoyDir::POS},
+  //{Event::RightPaddleAIncrease,  JOY_CTRL_NONE, JoyAxis::X, JoyDir::NEG},
+  {Event::RightPaddleAFire,   0},
+};
+
+PhysicalJoystickHandler::EventMappingArray PhysicalJoystickHandler::DefaultRightBPaddlesMapping = {
+  {Event::RightPaddleBAnalog, JOY_CTRL_NONE, JoyAxis::X, JoyDir::ANALOG},
+  // Current code does NOT allow digital and anlog events on the same axis at the same
+  //{Event::RightPaddleBDecrease,JOY_CTRL_NONE, JoyAxis::X, JoyDir::POS},
+  //{Event::RightPaddleBIncrease,JOY_CTRL_NONE, JoyAxis::X, JoyDir::NEG},
+  {Event::RightPaddleBFire,   0},
 };
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

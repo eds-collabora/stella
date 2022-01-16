@@ -204,22 +204,28 @@ class Paddles : public Controller
     */
     void swapEvents(Event::Type& event1, Event::Type& event2);
 
-    AnalogReadout::Connection getReadOut(int lastAxis, int& newAxis, int center);
+    AnalogReadout::Connection getReadOut(int lastAxis, int& newAxis, int center, int range);
+
+    void updateA();
+    void updateB();
 
     /**
       Update the axes pin state according to the events currently set.
     */
-    bool updateAnalogAxes();
+    bool updateAnalogAxesA();
+    bool updateAnalogAxesB();
 
     /**
       Update the entire state according to mouse events currently set.
     */
-    void updateMouse(bool& firePressedA, bool& firePressedB);
+    void updateMouseA(bool& firePressedA);
+    void updateMouseB(bool& firePressedB);
 
     /**
       Update the axes pin state according to the keyboard events currently set.
     */
-    void updateDigitalAxes();
+    void updateDigitalAxesA();
+    void updateDigitalAxesB();
 
   private:
     // Following constructors and assignment operators not supported
